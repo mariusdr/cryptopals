@@ -9,7 +9,7 @@ import Data.Char (ord)
 import Data.IntMap.Strict (IntMap, fromAscList, (!))
 import Data.Word (Word8)
 import Data.Either (fromRight)
-
+import Numeric (showHex)
 
 hex :: Parser Word8
 hex = liftA2 mkWord8 hexChar hexChar 
@@ -32,9 +32,11 @@ parseHex = parseOnly hexString
 parseHexInp :: String -> Either String ByteString
 parseHexInp = parseHex . BS.pack . map (fromIntegral . ord) 
 
-parseHexInp' :: String -> ByteString  
-parseHexInp' inp = fromRight zeroStr res
-    where 
-        res = parseHexInp inp 
-        zeroStr = BS.pack [(fromIntegral . ord) '0']
+decodeHex :: String -> ByteString
+decodeHex inp = fromRight zeroStr res
+  where
+    res = parseHexInp inp
+    zeroStr = BS.pack [(fromIntegral . ord) '0']
 
+encodeHex :: ByteString -> String
+encodeHex = foldr showHex "" . BS.unpack

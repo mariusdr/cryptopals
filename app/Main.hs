@@ -2,14 +2,19 @@ module Main where
 import HexParser (decodeHex, encodeHex)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
-import qualified Data.Bits as BIT
+import qualified Data.Bits as B
 import Data.Word (Word8)
 import Data.Char (chr, ord)
 import Data.Map (Map, unionsWith, singleton, (!), member)
 import Data.List (head)
+import qualified Data.Text as T
+import Data.Text.Encoding (encodeUtf8)
+import System.IO 
+import Control.Monad
+
 
 xor :: ByteString -> ByteString -> ByteString 
-xor xs ys = BS.pack $ map (uncurry BIT.xor) $ BS.zip xs ys
+xor xs ys = BS.pack $ map (uncurry B.xor) $ BS.zip xs ys
 
 hist :: String -> Map Char Int 
 hist xs = unionsWith (+) $ map (flip singleton 1) xs 
@@ -23,7 +28,7 @@ score xs = foldr ((+) . uncurry charScore) 0 coeffs
         charScore char coeff = lookup' char * coeff
 
 repeatN :: Int -> Word8 -> ByteString 
-repeatN n x = BS.pack $  replicate n x
+repeatN n x = BS.pack $ replicate n x
 
 solve :: ByteString -> Word8 -> ByteString 
 solve xs y = xor xs ys
@@ -45,11 +50,33 @@ solver xs = map scorer [1..255]
 showSolution :: Word8 -> Int -> ByteString -> String 
 showSolution c i bs = "Char: " ++ show c ++ " Score: " ++ show i ++ " Msg: " ++ show bs
 
-main :: IO () 
-main = mapM_ (putStrLn .(\(c,i,bs) -> showSolution c i bs)) solutions
+repeatUntil :: Int -> ByteString -> ByteString 
+repeatUntil = repeatUntil' BS.empty 
     where 
-        inp = decodeHex "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736"
-        solutions = solver inp
+        repeatUntil' :: ByteString -> Int -> ByteString -> ByteString 
+        repeatUntil' acc n bs | BS.length acc < n = repeatUntil' (BS.concat [acc, bs]) n bs
+                              | BS.length acc >= n = BS.take n acc 
 
+repeatedKeyXorCipher :: ByteString -> ByteString -> ByteString  
+repeatedKeyXorCipher key input = xor key' input
+    where
+        key' = repeatUntil (BS.length input) key
+
+
+hammingDist :: ByteString -> ByteString -> Int 
+hammingDist xs ys = sum $ map B.popCount $ BS.unpack $ xor xs ys
+
+main :: IO ()
+main = print $ hammingDist a b 
+    where 
+        a = encodeUtf8 $ T.pack "this is a test"
+        b = encodeUtf8 $ T.pack "wokka wokka!!!"
+
+-- main :: IO () 
+-- main = do 
+--     handle <- openFile "set1challenge6input" ReadMode 
+--     contents <- hGetContents handle 
+--     print contents
+--     hClose handle
 
 

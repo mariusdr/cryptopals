@@ -29,6 +29,6 @@ executable cryptopals
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
-    build-depends:    base, attoparsec, bytestring, containers
+    build-depends:    base, attoparsec, bytestring, containers, text
     hs-source-dirs:   app
     default-language: Haskell2010

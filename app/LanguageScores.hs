@@ -1,11 +1,13 @@
 module LanguageScores where 
 
 import Data.HashMap.Strict (HashMap, unionWith, foldrWithKey, findWithDefault, fromList, empty, singleton)
-import Data.Hashable (Hashable)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.UTF8 as BSU
 import Data.Char (chr, ord, toLower)
+import Data.Hashable (Hashable)
+
+import Utils (unionsWith)
 
 scoreHistograms :: (Eq t, Hashable t) => HashMap t Float -> HashMap t Int -> Float 
 scoreHistograms scoreMap = foldrWithKey foldF 0 
@@ -23,10 +25,6 @@ oneGramCounts = fromList oneGrams
             ('u', 2.73), ('m', 2.51), ('f', 2.40), ('p', 2.14), ('g', 1.87), ('w', 1.68),
             ('y', 1.66), ('b', 1.48), ('v', 1.05), ('k', 0.54), ('x', 0.23), ('j', 0.16),
             ('q', 0.12), ('z', 0.09)]
-
--- unionsWith of Data.Map adapted for HashMaps
-unionsWith :: (Eq k, Hashable k, Foldable f) => (v -> v -> v) -> f (HashMap k v) -> HashMap k v
-unionsWith f = foldl (unionWith f) empty
 
 oneGramHistogram :: String -> HashMap Char Int 
 oneGramHistogram xs = unionsWith (+) $ map (flip singleton 1) xs 

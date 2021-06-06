@@ -4,7 +4,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.UTF8 as BSU
 import qualified Data.Bits as B
-import Data.Word (Word8)
+import Data.Word (Word8, byteSwap16)
 import Data.Char (chr, ord)
 import Data.Map (Map, unionsWith, singleton, (!), member)
 import Data.List (head, lines, sortBy)
@@ -21,17 +21,9 @@ import Data.Either (fromRight)
 import Data.Function (on)
 
 import LanguageScores (oneGramScore, oneGramScoreStr, nonAsciiPenalty)
+import Utils (computeByteEntropy, xor, hammingDist, transposeByteMatrix)
 
--- main :: IO ()
--- main = do 
---     let inp = "helloworld"
---     let dec = encodeSingleByteXor 42 $ BSU.fromString inp
---     let enc = decodeSingleByteXor 42 dec
---     print dec
---     print enc
 
-xor :: ByteString -> ByteString -> ByteString 
-xor xs ys = BS.pack $ map (uncurry B.xor) $ BS.zip xs ys
 
 -- Set 1 Challenge 2
 testXor :: IO ()
@@ -89,7 +81,8 @@ breakSingleByteXor :: IO ()
 breakSingleByteXor = do 
     let msg = decodeHex "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736"
     
-    let keyRange = [0..255]
+    let keyRange = [48..57] ++ [65..90] ++ [97..122] -- ascii 0-9 A-Z a-z
+    -- let keyRange = [0..255]
     let scoreFn = oneGramScore 
     let solutions = solveSingleByteXor scoreFn msg keyRange
 
@@ -105,9 +98,6 @@ solveSingleByteXorMultiLine scoreFn msgs keys = sortBy (\(_, s0) (_, s1) -> comp
 
         allSolutions = concatMap (uncurry solutionsOfLine) msgs
 
-solveSingleByteXorMultiLineTakeN :: Int -> (ByteString -> Float) -> [(Int, ByteString)] -> [Word8] -> [(Int, Solution)]
-solveSingleByteXorMultiLineTakeN n scoreFn msgs keys = take n $ solveSingleByteXorMultiLine scoreFn msgs keys
-
 -- set 1 challenge 4
 detectSingleByteXor :: IO ()
 detectSingleByteXor = do
@@ -115,103 +105,126 @@ detectSingleByteXor = do
     conts <- hGetContents handle
     let inputs = zip [0..(length (lines conts))] (map decodeHex (lines conts))
 
+    -- Single byte xor cipher is invariant under entropy, so if there is only 
+    -- one "real" sentence in here and the other ones are random generated (high entropy)
+    -- the encrypted real sentence should still have the least entropy..
+    -- I.e. only use the ten lowest entropy inputs:
+    let inputsSorted = sortBy (\(_, m0) (_, m1) -> compare (computeByteEntropy m0) (computeByteEntropy m1)) inputs
+    let inputsSelected = take 10 inputsSorted
+
     let keyRange = [0..255]
     let scoreFn = oneGramScore
 
-    let solutions = solveSingleByteXorMultiLineTakeN 10 scoreFn inputs keyRange 
+    -- only return the 10 best solutions
+    let solutions = take 10 $ solveSingleByteXorMultiLine scoreFn inputsSelected keyRange 
 
     -- mapM_ (putStrLn . (\(idx, line) -> show idx ++ ": " ++ show line)) inputs
     mapM_ (putStrLn . (\(idx, sol) -> show idx ++ ": " ++ show sol)) solutions
 
-main = detectSingleByteXor
+-- test optimization for set 1 challenge 4
+entropyAnalysis :: IO ()
+entropyAnalysis = do 
+    handle <- openFile "set1challenge4input" ReadMode
+    conts <- hGetContents handle
+    let inputs = zip [0..(length (lines conts))] (map decodeHex (lines conts))
 
+    let entropies = map (\(i, m) -> (i, computeByteEntropy m)) inputs
+    let entropiesSorted = sortBy (compare `on` snd) entropies 
 
+    mapM_ (putStrLn . (\(idx, sol) -> show idx ++ ": " ++ show sol)) entropiesSorted
 
--- repeatUntil :: Int -> ByteString -> ByteString 
--- repeatUntil = repeatUntil' BS.empty 
---     where 
---         repeatUntil' :: ByteString -> Int -> ByteString -> ByteString 
---         repeatUntil' acc n bs | BS.length acc < n = repeatUntil' (BS.concat [acc, bs]) n bs
---                               | BS.length acc >= n = BS.take n acc 
-
--- repeatedKeyXorCipher :: ByteString -> ByteString -> ByteString  
--- repeatedKeyXorCipher key input = xor key' input
---     where
---         key' = repeatUntil (BS.length input) key
-
-
--- hammingDist :: ByteString -> ByteString -> Int 
--- hammingDist xs ys = sum $ map B.popCount $ BS.unpack $ xor xs ys
-
-
--- selfHammingDist :: ByteString -> Int -> Int 
--- selfHammingDist xs keySize = hammingDist fst snd 
---     where 
---         fst = BS.take keySize xs 
---         snd = BS.take keySize $ BS.drop (BS.length xs - keySize) xs 
-
-
--- estimateKeySize :: ByteString -> [(Int, Float)] 
--- estimateKeySize xs = sortBy (compare `on` snd) $ zip [2..40] scores 
---     where 
---         scores = map (\k -> fromIntegral (selfHammingDist xs k) / fromIntegral k) [2..40]
-
-
--- blockSplit :: Int -> ByteString -> [ByteString] 
--- blockSplit = blockSplit' []
---     where 
---         blockSplit' :: [ByteString] -> Int -> ByteString -> [ByteString]
---         blockSplit' acc blockSize xs | BS.null xs = acc
---                                      | otherwise = blockSplit' (acc ++ [BS.take blockSize xs]) blockSize (BS.drop blockSize xs) 
-
--- transposeBlocks :: [ByteString] -> [ByteString]
--- transposeBlocks xss = map BS.pack tSplits
---     where 
---         transpose :: [[Word8]] -> [[Word8]]
---         transpose ([]:_) = []
---         transpose x = map head x : transpose (map tail x)
+encodeRepeatedKeyXor :: ByteString -> ByteString -> ByteString  
+encodeRepeatedKeyXor key input = xor key' input
+    where
+        repeatUntil = repeatUntil' BS.empty 
+            where 
+                repeatUntil' acc n bs | BS.length acc < n = repeatUntil' (BS.concat [acc, bs]) n bs
+                                      | BS.length acc >= n = BS.take n acc 
         
---         padMat :: Int -> [[Word8]] -> [[Word8]]
---         padMat reqRowLen = map appendFn
---             where 
---                 delta :: [Word8] -> Int
---                 delta xs = reqRowLen - length xs
+        key' = repeatUntil (BS.length input) key
 
---                 appendFn :: [Word8] -> [Word8]
---                 appendFn xs = if delta xs > 0 then xs ++ replicate (delta xs) 0 else xs
+decodeRepeatedKeyXor :: ByteString -> ByteString -> ByteString 
+decodeRepeatedKeyXor = encodeRepeatedKeyXor
 
---         maxLen = maximum (map BS.length xss)
---         splits = map BS.unpack xss
---         tSplits = transpose $ padMat maxLen splits
+testRepeatedKeyXor :: IO () 
+testRepeatedKeyXor = do 
+    let inp = BSU.fromString "Burning 'em, if you ain't quick and nimble I go crazy when I hear a cymbal"
+    let key = BSU.fromString "ICE"
+    let enc = encodeRepeatedKeyXor key inp 
+    print $ encodeHex enc
 
--- -- main :: IO ()
--- -- main = print $ hammingDist a b 
--- --     where 
--- --         a = encodeUtf8 $ T.pack "this is a test"
--- --         b = encodeUtf8 $ T.pack "wokka wokka!!!"
 
--- -- main :: IO ()
--- -- main = do 
--- --     let bss = [BS.pack [1,2,3,4], BS.pack [5,6,7,8]]
--- --     let tBss = transposeBlocks bss
--- --     let ttBss = transposeBlocks tBss
--- --     print $ (map BS.unpack) tBss
--- --     print $ (map BS.unpack) ttBss
+testHammingdist :: IO ()
+testHammingdist = do
+    let inp1 = BSU.fromString "this is a test"
+    let inp2 = BSU.fromString "wokka wokka!!!"
+    let dist = hammingDist inp1 inp2 
+    print dist -- should be 37
 
--- -- main :: IO () 
--- -- main = do 
--- --     handle <- openFile "set1challenge6input" ReadMode 
--- --     txt <- hGetContents handle 
--- --     let msg = fromRight C8.empty $ B64.decode $ C8.filter (/= '\n') $ C8.pack txt
--- --     let keySizes = estimateKeySize msg
--- --     let (keySize, _) = head keySizes
+splitMessage :: Int -> ByteString -> [ByteString] 
+splitMessage = split' []
+    where
+        split' acc blockSize xs | BS.null xs = acc
+                                | otherwise = split' (acc ++ [BS.take blockSize xs]) blockSize (BS.drop blockSize xs) 
 
--- --     let blocks = blockSplit keySize msg
--- --     let transposedBlocks = transposeBlocks blocks
+scoreKeySize :: Int -> ByteString -> Float
+scoreKeySize keySize msg = sum scores / fromIntegral (length scores)
+    where 
+        blocks = splitMessage keySize msg 
+        blockIter = zip blocks (tail blocks)
+        scoreFn b1 b2 = fromIntegral (hammingDist b1 b2) / fromIntegral keySize
+        scores = map (uncurry scoreFn) blockIter 
 
--- --     let solvedTransposedBlocks = map (solve) 
--- --     --print $ map BS.unpack bs
+estimateKeySize :: [Int] -> ByteString -> [(Int, Float)] 
+estimateKeySize keySizes msg = sortBy (compare `on` snd) scores 
+    where 
+        scores = map (\ks -> (ks, scoreKeySize ks msg)) keySizes
 
--- --     hClose handle
+transposeBlocks :: [ByteString] -> [ByteString]
+transposeBlocks messages = map BS.pack tSplits
+    where 
+        padMat :: Int -> [[Word8]] -> [[Word8]]
+        padMat reqRowLen = map appendFn
+            where 
+                delta xs = reqRowLen - length xs
+                appendFn xs = if delta xs > 0 then xs ++ replicate (delta xs) 0 else xs
+
+        maxLen = maximum (map BS.length messages)
+        splits = map BS.unpack messages
+        tSplits = transposeByteMatrix $ padMat maxLen splits
+
+solveForKeySize :: Int -> ByteString -> ByteString
+solveForKeySize keySize msg = BS.pack keys
+    where 
+        blocks = splitMessage keySize msg
+        transposedBlocks = transposeBlocks blocks 
+
+        solveForBlock :: ByteString -> Word8 
+        solveForBlock block = key $ head solutions
+            where 
+                -- keyRange = [0..255]
+                keyRange = [48..57] ++ [65..90] ++ [97..122] -- ascii 0-9 A-Z a-z
+                scoreFn = oneGramScore 
+                solutions = solveSingleByteXor scoreFn msg keyRange
+        
+        keys = map solveForBlock transposedBlocks
+
+
+main :: IO () 
+main = do 
+    handle <- openFile "set1challenge6input" ReadMode 
+    txt <- hGetContents handle 
+    let msg = fromRight C8.empty $ B64.decode $ C8.filter (/= '\n') $ C8.pack txt
+    let keySizes = estimateKeySize [1..40] msg
+
+    -- mapM_ print keySizes
+
+    let key = solveForKeySize 29 msg
+    let dec = decodeRepeatedKeyXor key msg
+
+    -- print ("Key: " ++ encodeHex key) 
+    -- print ("Decoded Message: "  ++ BSU.toString dec)
+
+    hClose handle
 
 

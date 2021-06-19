@@ -61,9 +61,27 @@ solveForLine (n, msg) = do
     let blocks = sliceInBlocks 16 msg 
     putStrLn ("Message " ++ show n ++ " has " ++ show (countAllDups blocks) ++ " duplicate 16 Byte blocks.")
 
-main :: IO ()
-main = do 
+-- set 1 challenge 8
+detectECBEncryptedMessage :: IO ()
+detectECBEncryptedMessage = do 
     handle <- openFile "set1challenge8input" ReadMode
     txt <- hGetContents handle
     let msgs = map decodeHex (lines txt)
     mapM_ solveForLine (zip [0..] msgs)
+
+
+pcks7 :: Int -> ByteString -> ByteString 
+pcks7 k msg = BS.concat [msg, pad]
+    where 
+        padval = k - BS.length msg `mod` k
+        diff = k - BS.length msg
+        pad = BS.replicate diff (fromIntegral padval)
+
+-- set 2 challenge 1
+implPKCS7 :: IO ()
+implPKCS7 = do 
+    let msg = BSU.fromString "YELLOW SUBMARINE"
+    let msg' = pcks7 20 msg
+    print msg'
+
+main = implPKCS7
